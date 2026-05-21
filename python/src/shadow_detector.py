@@ -41,8 +41,15 @@ class DetectorConfig:
     diff_threshold: int = 35
     min_area_ratio: float = 0.002
     max_components: int = 8
-    background_alpha: float = 0.01
-    background_freeze_after_seconds: float = 3.0
+    # Background learning. "max" = per-pixel running max (immune to transient
+    # darkening like the agent passing through). "ema" = exponential mean
+    # (legacy; learns the agent into the background and breaks).
+    background_method: str = "max"
+    background_alpha: float = 0.01   # ema mode only
+    background_freeze_after_seconds: float = 8.0
+    # After freeze, slowly raise the background if the live pixel is brighter
+    # (handles gentle lighting drift). Set 0 to disable.
+    background_post_freeze_brighten_alpha: float = 0.0
     track_max_distance_norm: float = 0.15
 
 
@@ -63,22 +70,52 @@ class ShadowDetector:
         self._t0 = time.time()
         self._background_frozen = False
 
+    def background_status(self) -> tuple[str, float]:
+        """Return (state, seconds_remaining). state in {"empty","learning","frozen"}."""
+        if self.background is None:
+            return "empty", 0.0
+        if self._background_frozen:
+            return "frozen", 0.0
+        remaining = max(0.0, self.cfg.background_freeze_after_seconds - (time.time() - self._t0))
+        return "learning", remaining
+
     @property
     def total_area(self) -> int:
         return self.W * self.H
 
     def _update_background(self, gray: np.ndarray) -> None:
         if self.background is None:
+            # Seed with the first frame. If the agent already occludes some pixels,
+            # the running-max update below will lift those pixels as soon as they
+            # become bright again.
             self.background = gray.astype(np.float32)
             return
-        if self._background_frozen:
-            return
+
         elapsed = time.time() - self._t0
-        if elapsed >= self.cfg.background_freeze_after_seconds:
-            self._background_frozen = True
+        gray_f = gray.astype(np.float32)
+
+        if not self._background_frozen:
+            if self.cfg.background_method == "max":
+                # Per-pixel running max. Transient darkening (agent passing through,
+                # short shadows) is ignored. Each pixel locks in its brightest
+                # state seen so far during the learn window.
+                np.maximum(self.background, gray_f, out=self.background)
+            else:  # "ema"
+                a = self.cfg.background_alpha
+                cv2.accumulateWeighted(gray_f, self.background, a)
+
+            if elapsed >= self.cfg.background_freeze_after_seconds:
+                self._background_frozen = True
             return
-        a = self.cfg.background_alpha
-        cv2.accumulateWeighted(gray.astype(np.float32), self.background, a)
+
+        # Frozen branch: optional slow brightening to track lighting drift.
+        a = self.cfg.background_post_freeze_brighten_alpha
+        if a > 0.0:
+            brighter = gray_f > self.background
+            if np.any(brighter):
+                self.background[brighter] = (
+                    (1.0 - a) * self.background[brighter] + a * gray_f[brighter]
+                )
 
     def _detect_mask(self, gray: np.ndarray) -> np.ndarray:
         bg = self.background

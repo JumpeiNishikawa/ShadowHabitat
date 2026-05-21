@@ -19,8 +19,10 @@
     "diff_threshold": 35,
     "min_area_ratio": 0.002,
     "max_components": 8,
+    "background_method": "max",
     "background_alpha": 0.01,
-    "background_freeze_after_seconds": 3.0,
+    "background_freeze_after_seconds": 8.0,
+    "background_post_freeze_brighten_alpha": 0.0,
     "track_max_distance_norm": 0.15
   },
   "osc": {

@@ -78,8 +78,10 @@ def main():
             diff_threshold=int(det_cfg_raw.get("diff_threshold", 35)),
             min_area_ratio=float(det_cfg_raw.get("min_area_ratio", 0.002)),
             max_components=int(det_cfg_raw.get("max_components", 8)),
+            background_method=str(det_cfg_raw.get("background_method", "max")),
             background_alpha=float(det_cfg_raw.get("background_alpha", 0.01)),
-            background_freeze_after_seconds=float(det_cfg_raw.get("background_freeze_after_seconds", 3.0)),
+            background_freeze_after_seconds=float(det_cfg_raw.get("background_freeze_after_seconds", 8.0)),
+            background_post_freeze_brighten_alpha=float(det_cfg_raw.get("background_post_freeze_brighten_alpha", 0.0)),
             track_max_distance_norm=float(det_cfg_raw.get("track_max_distance_norm", 0.15)),
         ),
     )
@@ -125,6 +127,18 @@ def main():
                         cv2.putText(disp, f"{fps:.1f} fps  blobs={len(blobs)}",
                                     (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                                     (255, 255, 255), 2)
+                    bg_state, bg_remaining = det.background_status()
+                    if bg_state == "learning":
+                        bg_msg = f"BG learning ({bg_remaining:.1f}s left) - move the agent / keep hands OUT"
+                        bg_color = (0, 255, 255)
+                    elif bg_state == "frozen":
+                        bg_msg = "BG frozen - now show shadows  (press 'b' to relearn)"
+                        bg_color = (0, 255, 0)
+                    else:
+                        bg_msg = "BG empty"
+                        bg_color = (255, 255, 255)
+                    cv2.putText(disp, bg_msg, (10, 52),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, bg_color, 2)
                     cv2.imshow("surface (warped)", disp)
                     cv2.imshow("mask", mask)
                     key = cv2.waitKey(1) & 0xFF
