@@ -41,6 +41,7 @@ class AgentStateReceiver:
 
     def _on_agent_state(self, address: str, *args) -> None:
         if len(args) < 5:
+            print(f"[AgentStateReceiver] WARN: /agent/state received with {len(args)} args: {args}")
             return
         try:
             agent = AgentInfo(
@@ -51,10 +52,15 @@ class AgentStateReceiver:
                 radius=float(args[4]),
                 last_seen=time.time(),
             )
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as e:
+            print(f"[AgentStateReceiver] WARN: parse error {e}; args={args}")
             return
         with self._lock:
+            first_for_id = agent.id not in self._agents
             self._agents[agent.id] = agent
+        if first_for_id:
+            print(f"[AgentStateReceiver] FIRST /agent/state id={agent.id} "
+                  f"surface={agent.surface} x={agent.x:.3f} y={agent.y:.3f} r={agent.radius:.3f}")
 
     def start(self) -> None:
         self._server = ThreadingOSCUDPServer((self.host, self.port), self._dispatcher)

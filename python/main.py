@@ -128,6 +128,9 @@ def main():
     show_debug = True
     fps_t0 = time.time()
     frames = 0
+    diag_t0 = time.time()
+    diag_frames_with_agents = 0
+    diag_frames_total = 0
 
     try:
         with Camera(cam_cfg["device_id"], cam_cfg["width"], cam_cfg["height"], cam_cfg["fps"]) as cam:
@@ -145,6 +148,22 @@ def main():
                     agents=agents,
                     agent_mask_padding_px=agent_mask_padding_px,
                 )
+
+                diag_frames_total += 1
+                if agents:
+                    diag_frames_with_agents += 1
+                if time.time() - diag_t0 >= 2.0:
+                    cov = diag_frames_with_agents / max(1, diag_frames_total)
+                    sample = agents[0] if agents else None
+                    extra = (f" first_agent: id={sample.id} x={sample.x:.3f} y={sample.y:.3f} "
+                             f"r={sample.radius:.3f} surface={sample.surface}"
+                             if sample else "")
+                    print(f"[diag] agents/frame coverage={cov:.0%} "
+                          f"({diag_frames_with_agents}/{diag_frames_total} frames had agents)"
+                          + extra)
+                    diag_t0 = time.time()
+                    diag_frames_with_agents = 0
+                    diag_frames_total = 0
 
                 # Auto-send learn_end as soon as background freezes.
                 bg_state, _ = det.background_status()
