@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 namespace ShadowHabitat
@@ -24,6 +24,15 @@ namespace ShadowHabitat
         [Header("Wander")]
         public float wanderJitter = 1.2f;
         public float wanderTimescale = 1.5f;
+        [Tooltip("Re-pick a wander target when the agent gets this close (world units).")]
+        public float wanderArriveDistance = 0.5f;
+        [Tooltip("Minimum speed while wandering — keeps the agent visibly in motion.")]
+        public float wanderMinSpeed = 1.0f;
+
+        [Header("Debug")]
+        public bool verboseLogging = true;
+        [Tooltip("Throws every Update — set false to silence after diagnostics.")]
+        public float diagnosticLogInterval = 1.0f;
 
         [Header("Shadow avoidance")]
         public float avoidRadius = 2.2f;
@@ -42,11 +51,17 @@ namespace ShadowHabitat
         Vector2 _wanderTarget;
         float _wanderTimer;
         Vector3 _restPosition;
+        float _diagAccum;
+        int _frameCount;
 
         void Start()
         {
             _restPosition = transform.position;
             PickNewWanderTarget();
+            if (verboseLogging)
+            {
+                Debug.Log($"[ShapeAgent:{name}] Start. pos={transform.position}  surface={(surface != null ? surface.name : "NULL")}  shadowManager={(shadowManager != null ? shadowManager.name : "NULL")}  firstTarget={_wanderTarget}");
+            }
         }
 
         void Update()
@@ -94,9 +109,18 @@ namespace ShadowHabitat
             if (newState == CircleState.Wander)
             {
                 _wanderTimer -= dt;
-                if (_wanderTimer <= 0f) PickNewWanderTarget();
                 Vector2 toWander = _wanderTarget - pos;
-                desired += Vector2.ClampMagnitude(toWander * 1.5f, maxSpeed);
+                if (_wanderTimer <= 0f || toWander.magnitude < wanderArriveDistance)
+                {
+                    PickNewWanderTarget();
+                    toWander = _wanderTarget - pos;
+                }
+                Vector2 wanderForce = Vector2.ClampMagnitude(toWander * 2f, maxSpeed);
+                if (wanderForce.magnitude < wanderMinSpeed && toWander.sqrMagnitude > 1e-6f)
+                {
+                    wanderForce = toWander.normalized * wanderMinSpeed;
+                }
+                desired += wanderForce;
             }
 
             // 3. Boundary repulsion
@@ -127,6 +151,17 @@ namespace ShadowHabitat
 
             transform.position = new Vector3(next.x, next.y, transform.position.z);
             State = newState;
+
+            _frameCount++;
+            if (verboseLogging && diagnosticLogInterval > 0f)
+            {
+                _diagAccum += dt;
+                if (_diagAccum >= diagnosticLogInterval)
+                {
+                    _diagAccum = 0f;
+                    Debug.Log($"[ShapeAgent:{name}] state={State}  pos={(Vector2)transform.position}  vel={_velocity}  target={_wanderTarget}  framesSinceStart={_frameCount}");
+                }
+            }
         }
 
         void PickNewWanderTarget()
@@ -148,17 +183,17 @@ namespace ShadowHabitat
         {
             if (surface == null) return Vector2.zero;
             Vector3 origin = surface.transform.position;
-            float left   = origin.x;
-            float right  = origin.x + surface.widthWorld;
-            float top    = origin.y;
+            float left = origin.x;
+            float right = origin.x + surface.widthWorld;
+            float top = origin.y;
             float bottom = origin.y - surface.heightWorld;
 
             float margin = 0.6f;
             Vector2 force = Vector2.zero;
-            if (pos.x - left   < margin) force.x +=  (margin - (pos.x - left));
-            if (right  - pos.x < margin) force.x -=  (margin - (right  - pos.x));
-            if (top    - pos.y < margin) force.y -=  (margin - (top    - pos.y));
-            if (pos.y  - bottom< margin) force.y +=  (margin - (pos.y  - bottom));
+            if (pos.x - left < margin) force.x += (margin - (pos.x - left));
+            if (right - pos.x < margin) force.x -= (margin - (right - pos.x));
+            if (top - pos.y < margin) force.y -= (margin - (top - pos.y));
+            if (pos.y - bottom < margin) force.y += (margin - (pos.y - bottom));
             return force * 4f;
         }
 
@@ -166,9 +201,9 @@ namespace ShadowHabitat
         {
             if (surface == null) return p;
             Vector3 origin = surface.transform.position;
-            float left   = origin.x + bodyRadius;
-            float right  = origin.x + surface.widthWorld - bodyRadius;
-            float top    = origin.y - bodyRadius;
+            float left = origin.x + bodyRadius;
+            float right = origin.x + surface.widthWorld - bodyRadius;
+            float top = origin.y - bodyRadius;
             float bottom = origin.y - surface.heightWorld + bodyRadius;
             return new Vector2(
                 Mathf.Clamp(p.x, left, right),
