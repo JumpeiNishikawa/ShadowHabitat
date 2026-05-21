@@ -129,6 +129,21 @@ class ShadowDetector:
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
         return mask
 
+    def _apply_agent_mask(self, mask: np.ndarray, agents, padding_pixels: int = 4) -> np.ndarray:
+        """Zero out circular regions where agents live so they can't be detected as shadows."""
+        if not agents:
+            return mask
+        diag = max(self.W, self.H)
+        for a in agents:
+            cx = int(a.x * self.W)
+            cy = int(a.y * self.H)
+            # radius came in normalized by max(W,H); convert back to pixels.
+            r_px = int(a.radius * diag) + padding_pixels
+            if r_px <= 0:
+                continue
+            cv2.circle(mask, (cx, cy), r_px, 0, thickness=-1)
+        return mask
+
     def _extract_components(self, mask: np.ndarray) -> list[ShadowBlob]:
         min_area_px = max(50, int(self.cfg.min_area_ratio * self.total_area))
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
@@ -226,7 +241,12 @@ class ShadowDetector:
 
         return result
 
-    def process(self, surface_bgr: np.ndarray) -> tuple[list[ShadowBlob], np.ndarray, np.ndarray]:
+    def process(
+        self,
+        surface_bgr: np.ndarray,
+        agents=None,
+        agent_mask_padding_px: int = 4,
+    ) -> tuple[list[ShadowBlob], np.ndarray, np.ndarray]:
         gray = cv2.cvtColor(surface_bgr, cv2.COLOR_BGR2GRAY)
         k = max(1, int(self.cfg.blur_kernel))
         if k % 2 == 0:
@@ -234,6 +254,7 @@ class ShadowDetector:
         gray = cv2.GaussianBlur(gray, (k, k), 0)
         self._update_background(gray)
         mask = self._detect_mask(gray)
+        mask = self._apply_agent_mask(mask, agents or [], padding_pixels=agent_mask_padding_px)
         raw_blobs = self._extract_components(mask)
         tracked = self._track(raw_blobs)
         return tracked, mask, gray

@@ -42,3 +42,11 @@ class OscSender:
                 ],
             )
         self.client.send_message("/shadow/end", [self._frame])
+
+    def send_learn_start(self, duration_seconds: float) -> None:
+        """Tell Unity to hide agents and show a uniform bright surface for `duration`."""
+        self.client.send_message("/system/learn_start", [float(duration_seconds)])
+
+    def send_learn_end(self) -> None:
+        """Tell Unity to restore normal rendering after background learning."""
+        self.client.send_message("/system/learn_end", [])

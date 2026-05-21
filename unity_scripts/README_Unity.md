@@ -57,13 +57,21 @@
    - Surface は **左上原点** 扱い。これで surface の中心がカメラ正面に来る。
    - Scene ビューにシアン色の枠が出ているはず。
 
-### c) OSC Receiver
+### c) OSC Receiver / Sender（双方向）
 1. Create Empty → `OscReceiver`。
-2. Add Component → **uOSC.uOscServer**（uOSC パッケージから）。
-   - Port: `9000`（`config.json` の `osc.port` と合わせる）。
+2. Add Component → **uOSC.uOscServer**（uOSC から）。
+   - Port: `9000`。Auto Start: ON。
+3. Add Component → **Shadow Osc Receiver**。Expected Surface Id: `plane`。
+4. Add Component → **uOSC.uOscClient**（uOSC から）— **Python へ送り返す側**。
+   - Address: `127.0.0.1`、Port: `9001`（`config.json` の `osc.incoming_port` と合わせる）。
    - Auto Start: ON。
-3. Add Component → **Shadow Osc Receiver**。
-   - Expected Surface Id: `plane`。
+5. Add Component → **System Controller**（学習ハンドシェイクを受ける）。
+   - 下の (e) で円を作ったあと、Inspector の `Hide During Learn` リストに `CircleAgent` を**ドラッグ**して追加する。
+   - `Learn Flash Surface`：(g) で作る白塗り Quad を後で割り当てる（任意だが推奨）。
+6. Add Component → **Agent State Broadcaster**（Pythonへ円の位置を返す）。
+   - Surface: `Surface` をドラッグ。
+   - Agents: (e) で作る `CircleAgent` の **Shape Agent** コンポーネントをドラッグ追加。
+   - Send Interval: `0`（毎フレーム）。
 
 ### d) ShadowColliderManager
 1. Create Empty → `ShadowManager`。
@@ -94,16 +102,26 @@
 - Transform scale を `Surface` サイズに合わせる（白いSquareなら `(10, 5.625, 1)`）。
 - これがプロジェクタで映し出される「明るい背景」。Python側は輝度差分でこの背景の暗化（=影）を検出する。
 
+### g) 学習時用の白塗りフラッシュ（推奨）
+- Hierarchy → Create Empty Child of `Surface` → 名前 `LearnFlash`。
+- Add Component → **Sprite Renderer**、Sprite = 白Square、Color = pure white、Sorting Order を円より大きい値に（例 10）。
+- Transform local position `(5, -2.8125, 0.5)`、scale を Surface 全体に。
+- **初期は GameObject を Disable**（Inspectorのチェック外す）にしておく。
+- `OscReceiver` の **System Controller** の `Learn Flash Surface` フィールドにこの `LearnFlash` をドラッグ。
+- これで学習時：Pythonが `/system/learn_start` を送る → `CircleAgent` が非表示・`LearnFlash` が表示 → カメラは純白の投影面だけを撮る → クリーンな背景を学習できる。
+
 ## 5. 動かす
 
-1. **Python 側を起動**（先にやる）。別ターミナルで:
+1. **Unity を先に Play** （uOscServer / uOscClient を起動状態にしておく）。
+2. 別ターミナルで Python を起動:
    ```powershell
    cd C:\Users\jumpe\dev\ShadowHabitat\python
    python main.py
    ```
-   `surface (warped)` ウィンドウが出て影が緑の円で囲まれていればOK。
-2. Unity Editor で **Play** を押す。
-3. カメラの前で手を動かす → Unity の円が逃げ、覆うと震える。
+3. Python 起動直後に **自動で `/system/learn_start` を送信** → Unity 側の円が消えて白塗りに → Pythonが背景学習 → 学習完了で円が復帰。
+   - `surface (warped)` ウィンドウの黄色メッセージが緑になったら学習完了。
+4. カメラの前で手を動かす → Unity の円が逃げ、覆うと震える。
+5. 失敗したら Python ウィンドウで `b`キー → 再ハンドシェイク。
 
 ## 6. 投影本番
 
@@ -123,6 +141,9 @@
 | 円の逃げが鈍い | `avoidStrength` ↑ または `avoidRadius` ↑ | `CircleAgent` の ShapeAgent |
 | 震えがすぐ発動 | `coverDistance` を下げる | 同上 |
 | 影の半透明表示を消したい | `debugVisible` OFF | `ShadowManager` |
+| 円が影として誤検出される | `Agent State Broadcaster` が動いているか、`agents` リストに円が入っているか確認。Pythonウィンドウに青枠 `A#0` が描かれていればOK | OscReceiver |
+| 学習中に円が消えない | `System Controller` の `Hide During Learn` に円がドラッグされているか確認 | OscReceiver |
+| 円除外の余白を増やしたい | `agent_mask_padding_px` を 6 → 12 等に | `python/config.json` |
 
 ---
 

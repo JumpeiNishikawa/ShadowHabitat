@@ -53,16 +53,25 @@ python main.py
 
 ## 通信仕様（このリポジトリの正準）
 
-OSC over UDP, default `127.0.0.1:9000`.
+OSC over UDP. 双方向。
 
-| Address | Args | 意味 |
-|---|---|---|
-| `/shadow/begin` | `surface:string` `count:int` `frame:int` | フレーム開始 |
-| `/shadow/blob`  | `id:int` `x:float` `y:float` `area:float` `major:float` `minor:float` `angle:float` `vx:float` `vy:float` | 影1個分。x/y/area は surface 内 0..1 正規化 |
-| `/shadow/end`   | `frame:int` | フレーム確定 |
+| 方向 | Port | Address | Args | 意味 |
+|---|---|---|---|---|
+| Py → Unity | 9000 | `/shadow/begin` | `surface:string` `count:int` `frame:int` | フレーム開始 |
+| Py → Unity | 9000 | `/shadow/blob`  | `id:int` `x:float` `y:float` `area:float` `major:float` `minor:float` `angle:float` `vx:float` `vy:float` | 影1個分。x/y/area は surface 内 0..1 正規化 |
+| Py → Unity | 9000 | `/shadow/end`   | `frame:int` | フレーム確定 |
+| Py → Unity | 9000 | `/system/learn_start` | `duration:float` | 背景学習開始。Unityは円を非表示・白塗り |
+| Py → Unity | 9000 | `/system/learn_end`   | — | 学習終了。Unityは通常描画に戻す |
+| Unity → Py | 9001 | `/agent/state` | `id:int` `surface:string` `x:float` `y:float` `radius:float` | 円位置の返送。Pythonは影マスクから除外 |
 
-- 座標系: 画像原点 = 左上、x→右、y→下。Unity 側 `Surface.cs` が y を反転してワールドへ変換。
-- area は surface 面積に対する比、major/minor は max(W,H) で正規化。
+- 座標系: 画像原点 = 左上、x→右、y→下。Unity `Surface.cs` が y を反転してワールドへ変換。
+- area は surface 面積に対する比、major/minor/radius は max(W,H) で正規化。
+
+### 自己検出防止
+Unity は毎フレーム `/agent/state` で各エージェントの位置・半径を Python に返送する。Python は影マスクからそのディスク領域を除外（`agent_mask_padding_px` で余白拡張）。これにより円自身が「影」として検出されない。
+
+### 背景学習ハンドシェイク
+Python起動時 / `b`キー押下時に `/system/learn_start` を発行 → Unity が円を非表示・白塗り → Python が per-pixel running max でクリーン背景学習 → freeze後に `/system/learn_end` を発行 → Unity 復帰。
 
 ## ログ
 

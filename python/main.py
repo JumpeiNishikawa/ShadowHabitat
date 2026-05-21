@@ -1,11 +1,11 @@
-"""Stage 1 / Phase 1-2: shadow detection + OSC to Unity.
+"""Stage 1 / Phase 1-2: shadow detection + bidirectional OSC with Unity.
 
 Usage:
-  python main.py [--config config.json] [--no-display] [--no-osc]
+  python main.py [--config config.json] [--no-display] [--no-osc] [--no-log]
 
 Keys (when display enabled):
   q / esc : quit
-  b       : re-learn background (3 seconds)
+  b       : re-learn background (asks Unity to hide the agent during learn)
   d       : toggle debug overlay
 """
 from __future__ import annotations
@@ -22,10 +22,11 @@ from src.camera import Camera
 from src.calibration import Calibration
 from src.shadow_detector import DetectorConfig, ShadowDetector
 from src.osc_sender import OscSender
+from src.osc_receiver import AgentStateReceiver
 from src.csv_logger import CsvLogger
 
 
-def draw_overlay(surface_bgr, blobs, mask):
+def draw_overlay(surface_bgr, blobs, mask, agents):
     disp = surface_bgr.copy()
     H, W = disp.shape[:2]
     overlay = disp.copy()
@@ -37,6 +38,14 @@ def draw_overlay(surface_bgr, blobs, mask):
         cv2.circle(disp, (cx, cy), r, (0, 255, 0), 2)
         cv2.putText(disp, f"#{b.id}", (cx + 6, cy - 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+    diag = max(W, H)
+    for a in agents:
+        cx = int(a.x * W)
+        cy = int(a.y * H)
+        r = max(4, int(a.radius * diag))
+        cv2.circle(disp, (cx, cy), r, (255, 200, 0), 2)
+        cv2.putText(disp, f"A#{a.id}", (cx + 6, cy + 14),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1)
     return disp
 
 
@@ -69,6 +78,7 @@ def main():
     Wsurf = calib.warp_width
     Hsurf = calib.warp_height
 
+    learn_duration = float(det_cfg_raw.get("background_freeze_after_seconds", 8.0))
     det = ShadowDetector(
         warp_width=Wsurf,
         warp_height=Hsurf,
@@ -80,18 +90,40 @@ def main():
             max_components=int(det_cfg_raw.get("max_components", 8)),
             background_method=str(det_cfg_raw.get("background_method", "max")),
             background_alpha=float(det_cfg_raw.get("background_alpha", 0.01)),
-            background_freeze_after_seconds=float(det_cfg_raw.get("background_freeze_after_seconds", 8.0)),
+            background_freeze_after_seconds=learn_duration,
             background_post_freeze_brighten_alpha=float(det_cfg_raw.get("background_post_freeze_brighten_alpha", 0.0)),
             track_max_distance_norm=float(det_cfg_raw.get("track_max_distance_norm", 0.15)),
         ),
     )
+    agent_mask_padding_px = int(det_cfg_raw.get("agent_mask_padding_px", 4))
 
     osc = None if args.no_osc else OscSender(osc_cfg["host"], int(osc_cfg["port"]))
+    incoming_port = int(osc_cfg.get("incoming_port", 9001))
+    agent_rx = AgentStateReceiver(host="0.0.0.0", port=incoming_port)
+    agent_rx.start()
+
     log = None
     if log_cfg.get("enabled", True) and not args.no_log:
         log = CsvLogger(cfg_path.parent / log_cfg.get("dir", "logs"))
 
     surface_id = str(surf_cfg.get("id", "plane"))
+    last_learn_signaled_end = True
+
+    def signal_learn_start():
+        if osc is None:
+            return
+        osc.send_learn_start(learn_duration)
+        print(f"[main] sent /system/learn_start ({learn_duration:.1f}s) to Unity")
+
+    def signal_learn_end():
+        if osc is None:
+            return
+        osc.send_learn_end()
+        print("[main] sent /system/learn_end to Unity")
+
+    # Kick off the initial learn handshake.
+    signal_learn_start()
+    last_learn_signaled_end = False
 
     show_debug = True
     fps_t0 = time.time()
@@ -106,7 +138,19 @@ def main():
                     print("[main] camera read failed")
                     break
                 surface = cv2.warpPerspective(frame, H, (Wsurf, Hsurf))
-                blobs, mask, _gray = det.process(surface)
+
+                agents = agent_rx.snapshot(surface_id)
+                blobs, mask, _gray = det.process(
+                    surface,
+                    agents=agents,
+                    agent_mask_padding_px=agent_mask_padding_px,
+                )
+
+                # Auto-send learn_end as soon as background freezes.
+                bg_state, _ = det.background_status()
+                if bg_state == "frozen" and not last_learn_signaled_end:
+                    signal_learn_end()
+                    last_learn_signaled_end = True
 
                 if osc is not None:
                     osc.send_frame(surface_id, blobs)
@@ -122,17 +166,17 @@ def main():
                     fps = None
 
                 if show:
-                    disp = draw_overlay(surface, blobs, mask) if show_debug else surface
+                    disp = draw_overlay(surface, blobs, mask, agents) if show_debug else surface
                     if fps is not None:
-                        cv2.putText(disp, f"{fps:.1f} fps  blobs={len(blobs)}",
+                        cv2.putText(disp, f"{fps:.1f} fps  blobs={len(blobs)}  agents={len(agents)}",
                                     (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                                     (255, 255, 255), 2)
                     bg_state, bg_remaining = det.background_status()
                     if bg_state == "learning":
-                        bg_msg = f"BG learning ({bg_remaining:.1f}s left) - move the agent / keep hands OUT"
+                        bg_msg = f"BG learning ({bg_remaining:.1f}s left) - Unity should be solid white"
                         bg_color = (0, 255, 255)
                     elif bg_state == "frozen":
-                        bg_msg = "BG frozen - now show shadows  (press 'b' to relearn)"
+                        bg_msg = "BG frozen - shadows live  (press 'b' to relearn)"
                         bg_color = (0, 255, 0)
                     else:
                         bg_msg = "BG empty"
@@ -146,10 +190,13 @@ def main():
                         break
                     elif key == ord("b"):
                         det.reset_background()
-                        print("[main] background reset")
+                        signal_learn_start()
+                        last_learn_signaled_end = False
+                        print("[main] background reset (handshake fired)")
                     elif key == ord("d"):
                         show_debug = not show_debug
     finally:
+        agent_rx.stop()
         if log is not None:
             log.close()
         cv2.destroyAllWindows()

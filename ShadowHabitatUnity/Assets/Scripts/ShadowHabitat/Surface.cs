@@ -29,6 +29,20 @@ namespace ShadowHabitat
                 p.z);
         }
 
+        public Vector2 WorldToNormalized(Vector3 world)
+        {
+            var p = transform.position;
+            float nx = (world.x - p.x) / Mathf.Max(1e-5f, widthWorld);
+            float ny = (p.y - world.y) / Mathf.Max(1e-5f, heightWorld);
+            return new Vector2(nx, ny);
+        }
+
+        public float WorldRadiusToNormalized(float radiusWorld)
+        {
+            float maxWH = Mathf.Max(widthWorld, heightWorld);
+            return radiusWorld / Mathf.Max(1e-5f, maxWH);
+        }
+
         public Vector2 NormalizedSizeToWorld(float majorNorm, float minorNorm)
         {
             // major/minor were normalized by max(W,H) in Python.
