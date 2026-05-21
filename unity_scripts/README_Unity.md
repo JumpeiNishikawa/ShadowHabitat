@@ -89,7 +89,10 @@
 2. Add Component → **Shape Agent**。
    - Surface: `Surface`。
    - Shadow Manager: `ShadowManager`。
-   - Body Radius: 0.4（円のスケールに合わせる）。
+   - **Body Radius**: 0.4（衝突・回避ロジック用。実視覚に厳密一致しなくてよい）。
+   - **Visual Radius**: スプライトの**見た目の半径**に合わせる（重要！自己マスク用）。
+     - 例：Transform Scale=(0.8, 0.8, 1) + デフォルトCircle Sprite なら 0.6〜0.8 程度
+     - 大きめに設定して構わない（自己マスクが緩めにかかる）
    - Max Speed / Avoid Radius / Avoid Strength は最初はデフォルトでOK。
 3. Add Component → **Agent Csv Logger**（任意）。
    - Agent: 自身の Shape Agent をドラッグ。
@@ -144,6 +147,10 @@
 | 円が影として誤検出される | `Agent State Broadcaster` が動いているか、`agents` リストに円が入っているか確認。Pythonウィンドウに青枠 `A#0` が描かれていればOK | OscReceiver |
 | 学習中に円が消えない | `System Controller` の `Hide During Learn` に円がドラッグされているか確認 | OscReceiver |
 | 円除外の余白を増やしたい | `agent_mask_padding_px` を 6 → 12 等に | `python/config.json` |
+| 円本体は除外できているが**動きの残像**が影と誤検出 | `motion_lookback_sec` を 0.12 → 0.20 に上げる | `python/config.json` |
+| Visual Radius が小さくて円の外周が露出 | ShapeAgent の `Visual Radius` を大きくする | `CircleAgent` |
+| 投影面の**外周**（プロジェクタ枠やUnityのGame画面端）が影として残る | `edge_inset_pixels` を 16 → 60 等に | `python/config.json` |
+| Python ウィンドウにフォーカス時 Unity が止まる | `runInBackground=true` が `[SystemController]` Awake ログに出ているか確認 | Unity Console |
 
 ---
 

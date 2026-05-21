@@ -62,7 +62,7 @@ OSC over UDP. 双方向。
 | Py → Unity | 9000 | `/shadow/end`   | `frame:int` | フレーム確定 |
 | Py → Unity | 9000 | `/system/learn_start` | `duration:float` | 背景学習開始。Unityは円を非表示・白塗り |
 | Py → Unity | 9000 | `/system/learn_end`   | — | 学習終了。Unityは通常描画に戻す |
-| Unity → Py | 9001 | `/agent/state` | `id:int` `surface:string` `x:float` `y:float` `radius:float` | 円位置の返送。Pythonは影マスクから除外 |
+| Unity → Py | 9001 | `/agent/state` | `id:int` `surface:string` `x:float` `y:float` `radius:float` `vx:float` `vy:float` | 円位置+速度の返送。Pythonは速度方向に伸ばしたカプセル形状でマスク除外（モーション残像吸収） |
 
 - 座標系: 画像原点 = 左上、x→右、y→下。Unity `Surface.cs` が y を反転してワールドへ変換。
 - area は surface 面積に対する比、major/minor/radius は max(W,H) で正規化。

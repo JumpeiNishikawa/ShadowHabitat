@@ -25,6 +25,8 @@ class AgentInfo:
     y: float
     radius: float
     last_seen: float
+    vx: float = 0.0
+    vy: float = 0.0
 
 
 class AgentStateReceiver:
@@ -50,6 +52,8 @@ class AgentStateReceiver:
                 x=float(args[2]),
                 y=float(args[3]),
                 radius=float(args[4]),
+                vx=float(args[5]) if len(args) >= 6 else 0.0,
+                vy=float(args[6]) if len(args) >= 7 else 0.0,
                 last_seen=time.time(),
             )
         except (TypeError, ValueError) as e:

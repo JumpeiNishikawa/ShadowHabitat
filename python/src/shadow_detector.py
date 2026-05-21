@@ -51,6 +51,10 @@ class DetectorConfig:
     # (handles gentle lighting drift). Set 0 to disable.
     background_post_freeze_brighten_alpha: float = 0.0
     track_max_distance_norm: float = 0.15
+    # Pixels to ignore around the outer edge of the warped surface. Useful when
+    # the calibration corners are slightly outside the projected area so the
+    # raw projector frame, monitor bezel, or wall edge bleed into view.
+    edge_inset_pixels: int = 16
 
 
 class ShadowDetector:
@@ -129,19 +133,58 @@ class ShadowDetector:
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
         return mask
 
-    def _apply_agent_mask(self, mask: np.ndarray, agents, padding_pixels: int = 4) -> np.ndarray:
-        """Zero out circular regions where agents live so they can't be detected as shadows."""
+    def _apply_edge_inset(self, mask: np.ndarray) -> np.ndarray:
+        inset = int(self.cfg.edge_inset_pixels)
+        if inset <= 0:
+            return mask
+        mask[:inset, :] = 0
+        mask[-inset:, :] = 0
+        mask[:, :inset] = 0
+        mask[:, -inset:] = 0
+        return mask
+
+    def _apply_agent_mask(
+        self,
+        mask: np.ndarray,
+        agents,
+        padding_pixels: int = 4,
+        motion_lookback_sec: float = 0.10,
+        motion_lookahead_sec: float = 0.05,
+    ) -> np.ndarray:
+        """Zero out the swept region for each agent so neither the agent body
+        nor its motion smear can register as a shadow.
+
+        For each agent we draw a capsule from `(now - vx*lookback, now - vy*lookback)`
+        to `(now + vx*lookahead, now + vy*lookahead)` with radius matching the agent's
+        projected radius plus padding. This covers:
+          - The current visible body (small static circle when vx=vy=0)
+          - The camera-exposure smear behind the current position
+          - A short prediction-window ahead to cover OSC latency
+        """
         if not agents:
             return mask
         diag = max(self.W, self.H)
         for a in agents:
-            cx = int(a.x * self.W)
-            cy = int(a.y * self.H)
-            # radius came in normalized by max(W,H); convert back to pixels.
             r_px = int(a.radius * diag) + padding_pixels
             if r_px <= 0:
                 continue
-            cv2.circle(mask, (cx, cy), r_px, 0, thickness=-1)
+            cx = a.x * self.W
+            cy = a.y * self.H
+            past_x = (a.x - a.vx * motion_lookback_sec) * self.W
+            past_y = (a.y - a.vy * motion_lookback_sec) * self.H
+            future_x = (a.x + a.vx * motion_lookahead_sec) * self.W
+            future_y = (a.y + a.vy * motion_lookahead_sec) * self.H
+
+            p_past   = (int(past_x),   int(past_y))
+            p_now    = (int(cx),       int(cy))
+            p_future = (int(future_x), int(future_y))
+
+            # Thick line = rectangular capsule body
+            cv2.line(mask, p_past,  p_future, 0, thickness=r_px * 2)
+            # Round caps at both ends + current center for safety
+            cv2.circle(mask, p_past,   r_px, 0, thickness=-1)
+            cv2.circle(mask, p_now,    r_px, 0, thickness=-1)
+            cv2.circle(mask, p_future, r_px, 0, thickness=-1)
         return mask
 
     def _extract_components(self, mask: np.ndarray) -> list[ShadowBlob]:
@@ -246,6 +289,8 @@ class ShadowDetector:
         surface_bgr: np.ndarray,
         agents=None,
         agent_mask_padding_px: int = 4,
+        motion_lookback_sec: float = 0.10,
+        motion_lookahead_sec: float = 0.05,
     ) -> tuple[list[ShadowBlob], np.ndarray, np.ndarray]:
         gray = cv2.cvtColor(surface_bgr, cv2.COLOR_BGR2GRAY)
         k = max(1, int(self.cfg.blur_kernel))
@@ -254,7 +299,14 @@ class ShadowDetector:
         gray = cv2.GaussianBlur(gray, (k, k), 0)
         self._update_background(gray)
         mask = self._detect_mask(gray)
-        mask = self._apply_agent_mask(mask, agents or [], padding_pixels=agent_mask_padding_px)
+        mask = self._apply_edge_inset(mask)
+        mask = self._apply_agent_mask(
+            mask,
+            agents or [],
+            padding_pixels=agent_mask_padding_px,
+            motion_lookback_sec=motion_lookback_sec,
+            motion_lookahead_sec=motion_lookahead_sec,
+        )
         raw_blobs = self._extract_components(mask)
         tracked = self._track(raw_blobs)
         return tracked, mask, gray

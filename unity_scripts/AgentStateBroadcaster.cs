@@ -76,14 +76,20 @@ namespace ShadowHabitat
                 if (!agent.gameObject.activeInHierarchy) { _skipInactiveGo++;    continue; }
 
                 var n = surface.WorldToNormalized(agent.transform.position);
-                float r = surface.WorldRadiusToNormalized(agent.bodyRadius);
+                // Send the VISIBLE radius so Python's shadow-mask exclusion
+                // matches the projected sprite, not the AI body collider.
+                float r = surface.WorldRadiusToNormalized(
+                    Mathf.Max(agent.bodyRadius, agent.visualRadius));
+                var v = surface.WorldVectorToNormalized(agent.Velocity);
 
                 _client.Send("/agent/state",
                     i,
                     surface.surfaceId ?? "plane",
                     n.x,
                     n.y,
-                    r);
+                    r,
+                    v.x,
+                    v.y);
                 _sendsThisHeartbeat++;
             }
             _accumHeartbeat();

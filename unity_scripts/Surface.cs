@@ -43,6 +43,18 @@ namespace ShadowHabitat
             return radiusWorld / Mathf.Max(1e-5f, maxWH);
         }
 
+        /// <summary>
+        /// Convert a world-space displacement (e.g., velocity) into normalized
+        /// surface-space displacement per the same units. y is flipped because
+        /// surface image coords run top-down while Unity y runs upward.
+        /// </summary>
+        public Vector2 WorldVectorToNormalized(Vector2 worldVec)
+        {
+            float nx = worldVec.x / Mathf.Max(1e-5f, widthWorld);
+            float ny = -worldVec.y / Mathf.Max(1e-5f, heightWorld);
+            return new Vector2(nx, ny);
+        }
+
         public Vector2 NormalizedSizeToWorld(float majorNorm, float minorNorm)
         {
             // major/minor were normalized by max(W,H) in Python.

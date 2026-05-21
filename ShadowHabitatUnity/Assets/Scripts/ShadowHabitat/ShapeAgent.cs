@@ -19,7 +19,16 @@ namespace ShadowHabitat
         [Header("Locomotion")]
         public float maxSpeed = 2.5f;
         public float maxAccel = 8f;
+        [Tooltip("Collision / behavior radius (world units). Used by avoidance & cover logic.")]
         public float bodyRadius = 0.4f;
+        [Tooltip("Visible projected radius (world units). Used by Python shadow-mask exclusion. " +
+                 "Set manually OR enable autoVisualRadiusFromRenderer below.")]
+        public float visualRadius = 0.6f;
+        [Tooltip("Auto-compute visualRadius from this GameObject's Renderer bounds on Start. " +
+                 "Recommended — matches the actual rendered sprite exactly.")]
+        public bool autoVisualRadiusFromRenderer = true;
+        [Tooltip("Multiplier applied to the auto-detected radius (1.1 = 10% safety margin).")]
+        public float autoVisualRadiusScale = 1.1f;
 
         [Header("Wander")]
         public float wanderJitter = 1.2f;
@@ -46,6 +55,7 @@ namespace ShadowHabitat
 
         public enum CircleState { Wander, AvoidShadow, Covered }
         public CircleState State { get; private set; } = CircleState.Wander;
+        public Vector2 Velocity => _velocity;
 
         Vector2 _velocity;
         Vector2 _wanderTarget;
@@ -58,10 +68,41 @@ namespace ShadowHabitat
         {
             _restPosition = transform.position;
             PickNewWanderTarget();
+
+            if (autoVisualRadiusFromRenderer)
+            {
+                float detected = ComputeRendererRadius();
+                if (detected > 0f)
+                {
+                    float scaled = detected * Mathf.Max(0.01f, autoVisualRadiusScale);
+                    visualRadius = Mathf.Max(visualRadius, scaled);
+                    if (verboseLogging)
+                        Debug.Log($"[ShapeAgent:{name}] auto visualRadius: detected={detected:F3}  " +
+                                  $"× scale {autoVisualRadiusScale:F2} = {scaled:F3}  → visualRadius={visualRadius:F3}");
+                }
+                else if (verboseLogging)
+                {
+                    Debug.LogWarning($"[ShapeAgent:{name}] autoVisualRadiusFromRenderer ON " +
+                                     $"but no Renderer found. Falling back to inspector value {visualRadius:F3}.");
+                }
+            }
+
             if (verboseLogging)
             {
                 Debug.Log($"[ShapeAgent:{name}] Start. pos={transform.position}  surface={(surface != null ? surface.name : "NULL")}  shadowManager={(shadowManager != null ? shadowManager.name : "NULL")}  firstTarget={_wanderTarget}");
             }
+        }
+
+        float ComputeRendererRadius()
+        {
+            float best = 0f;
+            foreach (var r in GetComponentsInChildren<Renderer>(includeInactive: true))
+            {
+                Vector3 ext = r.bounds.extents;
+                float candidate = Mathf.Max(ext.x, ext.y);
+                if (candidate > best) best = candidate;
+            }
+            return best;
         }
 
         void Update()

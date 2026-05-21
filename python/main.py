@@ -26,12 +26,16 @@ from src.osc_receiver import AgentStateReceiver
 from src.csv_logger import CsvLogger
 
 
-def draw_overlay(surface_bgr, blobs, mask, agents):
+def draw_overlay(surface_bgr, blobs, mask, agents, edge_inset_px=0):
     disp = surface_bgr.copy()
     H, W = disp.shape[:2]
     overlay = disp.copy()
     overlay[mask > 0] = (0, 0, 255)
     disp = cv2.addWeighted(disp, 0.7, overlay, 0.3, 0)
+    if edge_inset_px > 0:
+        cv2.rectangle(disp, (edge_inset_px, edge_inset_px),
+                      (W - edge_inset_px - 1, H - edge_inset_px - 1),
+                      (128, 128, 128), 1)
     for b in blobs:
         cx, cy = int(b.x * W), int(b.y * H)
         r = max(4, int(((b.area * W * H) / np.pi) ** 0.5))
@@ -43,6 +47,15 @@ def draw_overlay(surface_bgr, blobs, mask, agents):
         cx = int(a.x * W)
         cy = int(a.y * H)
         r = max(4, int(a.radius * diag))
+        # Velocity tail (where the smear/lag mask reaches)
+        vx_px = a.vx * W * 0.12  # rough preview of motion_lookback_sec
+        vy_px = a.vy * H * 0.12
+        p_past   = (int(cx - vx_px), int(cy - vy_px))
+        p_future = (int(cx + a.vx * W * 0.06), int(cy + a.vy * H * 0.06))
+        if vx_px * vx_px + vy_px * vy_px > 1.0:
+            cv2.line(disp, p_past, p_future, (255, 200, 0), 1)
+            cv2.circle(disp, p_past,   r, (180, 180, 100), 1)
+            cv2.circle(disp, p_future, r, (180, 180, 100), 1)
         cv2.circle(disp, (cx, cy), r, (255, 200, 0), 2)
         cv2.putText(disp, f"A#{a.id}", (cx + 6, cy + 14),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1)
@@ -93,9 +106,12 @@ def main():
             background_freeze_after_seconds=learn_duration,
             background_post_freeze_brighten_alpha=float(det_cfg_raw.get("background_post_freeze_brighten_alpha", 0.0)),
             track_max_distance_norm=float(det_cfg_raw.get("track_max_distance_norm", 0.15)),
+            edge_inset_pixels=int(det_cfg_raw.get("edge_inset_pixels", 16)),
         ),
     )
     agent_mask_padding_px = int(det_cfg_raw.get("agent_mask_padding_px", 4))
+    motion_lookback_sec = float(det_cfg_raw.get("motion_lookback_sec", 0.10))
+    motion_lookahead_sec = float(det_cfg_raw.get("motion_lookahead_sec", 0.05))
 
     osc = None if args.no_osc else OscSender(osc_cfg["host"], int(osc_cfg["port"]))
     incoming_port = int(osc_cfg.get("incoming_port", 9001))
@@ -147,6 +163,8 @@ def main():
                     surface,
                     agents=agents,
                     agent_mask_padding_px=agent_mask_padding_px,
+                    motion_lookback_sec=motion_lookback_sec,
+                    motion_lookahead_sec=motion_lookahead_sec,
                 )
 
                 diag_frames_total += 1
@@ -185,7 +203,9 @@ def main():
                     fps = None
 
                 if show:
-                    disp = draw_overlay(surface, blobs, mask, agents) if show_debug else surface
+                    disp = (draw_overlay(surface, blobs, mask, agents,
+                                         edge_inset_px=det.cfg.edge_inset_pixels)
+                            if show_debug else surface)
                     if fps is not None:
                         cv2.putText(disp, f"{fps:.1f} fps  blobs={len(blobs)}  agents={len(agents)}",
                                     (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7,

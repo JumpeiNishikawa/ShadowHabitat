@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -30,10 +30,15 @@ namespace ShadowHabitat
 
         void Awake()
         {
+            // Keep updating when Unity is not the foreground window — otherwise
+            // the broadcaster freezes whenever the user clicks the Python window.
+            Application.runInBackground = true;
+
             var srv = GetComponent<uOSC.uOscServer>();
             Debug.Log($"[SystemController:{name}] Awake.  uOscServer={(srv != null ? "OK" : "NULL")}  " +
                       $"hideDuringLearn.Count={hideDuringLearn.Count}  " +
-                      $"learnFlashSurface={(learnFlashSurface != null ? learnFlashSurface.name : "NULL")}");
+                      $"learnFlashSurface={(learnFlashSurface != null ? learnFlashSurface.name : "NULL")}  " +
+                      $"runInBackground={Application.runInBackground}");
             for (int i = 0; i < hideDuringLearn.Count; i++)
             {
                 var go = hideDuringLearn[i];
@@ -97,16 +102,23 @@ namespace ShadowHabitat
 
         void SetLearningVisible(bool learning)
         {
-            int toggled = 0, nulled = 0;
+            // Hide Renderers only — DO NOT toggle GameObject active state.
+            // This keeps ShapeAgent / AgentStateBroadcaster / Logger running so
+            // Python knows where the (invisible) agent is and the OSC link stays
+            // alive throughout the learn window.
+            int renderersToggled = 0, nulled = 0;
             foreach (var go in hideDuringLearn)
             {
                 if (go == null) { nulled++; continue; }
-                go.SetActive(!learning);
-                toggled++;
+                foreach (var r in go.GetComponentsInChildren<Renderer>(includeInactive: true))
+                {
+                    r.enabled = !learning;
+                    renderersToggled++;
+                }
             }
             if (learnFlashSurface != null) learnFlashSurface.SetActive(learning);
             Debug.Log($"[SystemController] SetLearningVisible({learning})  " +
-                      $"toggled={toggled}  null_entries={nulled}  " +
+                      $"renderers_toggled={renderersToggled}  null_entries={nulled}  " +
                       $"flashSurface={(learnFlashSurface != null ? (learning ? "shown" : "hidden") : "<none>")}");
         }
     }
