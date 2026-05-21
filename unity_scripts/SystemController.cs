@@ -31,12 +31,28 @@ namespace ShadowHabitat
         void Awake()
         {
             var srv = GetComponent<uOSC.uOscServer>();
-            srv.onDataReceived.AddListener(OnDataReceived);
+            Debug.Log($"[SystemController:{name}] Awake.  uOscServer={(srv != null ? "OK" : "NULL")}  " +
+                      $"hideDuringLearn.Count={hideDuringLearn.Count}  " +
+                      $"learnFlashSurface={(learnFlashSurface != null ? learnFlashSurface.name : "NULL")}");
+            for (int i = 0; i < hideDuringLearn.Count; i++)
+            {
+                var go = hideDuringLearn[i];
+                Debug.Log($"  hideDuringLearn[{i}] = " +
+                          (go == null ? "NULL  <-- empty slot, drag CircleAgent here!"
+                                      : $"{go.name}  active={go.activeSelf}"));
+            }
+            if (srv != null) srv.onDataReceived.AddListener(OnDataReceived);
             SetLearningVisible(false);
         }
 
         void OnDataReceived(uOSC.Message msg)
         {
+            // Only log /system/* to keep the console readable.
+            if (msg.address != null && msg.address.StartsWith("/system/"))
+            {
+                Debug.Log($"[SystemController] received OSC {msg.address}  " +
+                          $"values.Length={(msg.values != null ? msg.values.Length : 0)}");
+            }
             switch (msg.address)
             {
                 case "/system/learn_start":
@@ -81,11 +97,17 @@ namespace ShadowHabitat
 
         void SetLearningVisible(bool learning)
         {
+            int toggled = 0, nulled = 0;
             foreach (var go in hideDuringLearn)
             {
-                if (go != null) go.SetActive(!learning);
+                if (go == null) { nulled++; continue; }
+                go.SetActive(!learning);
+                toggled++;
             }
             if (learnFlashSurface != null) learnFlashSurface.SetActive(learning);
+            Debug.Log($"[SystemController] SetLearningVisible({learning})  " +
+                      $"toggled={toggled}  null_entries={nulled}  " +
+                      $"flashSurface={(learnFlashSurface != null ? (learning ? "shown" : "hidden") : "<none>")}");
         }
     }
 }

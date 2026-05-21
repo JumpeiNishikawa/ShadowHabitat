@@ -28,23 +28,52 @@ namespace ShadowHabitat
         uOSC.uOscClient _client;
         float _accum;
 
-        void Awake()
+        [Header("Debug")]
+        public bool verboseLogging = true;
+        public float heartbeatInterval = 2.0f;
+
+        int _sendsThisHeartbeat;
+        int _skipNullAgent;
+        int _skipDisabledAgent;
+        int _skipInactiveGo;
+        int _skipNoClient;
+        int _skipNoSurface;
+        float _heartbeatAccum;
+
+        void OnEnable()
         {
             _client = GetComponent<uOSC.uOscClient>();
+            if (verboseLogging)
+            {
+                Debug.Log($"[AgentStateBroadcaster:{name}] OnEnable. " +
+                          $"client={(_client != null ? "OK" : "NULL")}  " +
+                          $"surface={(surface != null ? surface.name : "NULL")}  " +
+                          $"agents.Count={agents.Count}");
+                for (int i = 0; i < agents.Count; i++)
+                {
+                    var a = agents[i];
+                    Debug.Log($"  agents[{i}] = " +
+                              (a == null ? "NULL"
+                               : $"{a.gameObject.name}  active={a.gameObject.activeInHierarchy}  enabled={a.enabled}"));
+                }
+            }
         }
 
         void Update()
         {
-            if (_client == null || surface == null) return;
+            if (_client == null) { _skipNoClient++; _accumHeartbeat(); return; }
+            if (surface == null) { _skipNoSurface++; _accumHeartbeat(); return; }
+
             _accum += Time.deltaTime;
-            if (sendInterval > 0f && _accum < sendInterval) return;
+            if (sendInterval > 0f && _accum < sendInterval) { _accumHeartbeat(); return; }
             _accum = 0f;
 
             for (int i = 0; i < agents.Count; i++)
             {
                 var agent = agents[i];
-                if (agent == null || !agent.isActiveAndEnabled) continue;
-                if (!agent.gameObject.activeInHierarchy) continue;
+                if (agent == null)                       { _skipNullAgent++;     continue; }
+                if (!agent.isActiveAndEnabled)           { _skipDisabledAgent++; continue; }
+                if (!agent.gameObject.activeInHierarchy) { _skipInactiveGo++;    continue; }
 
                 var n = surface.WorldToNormalized(agent.transform.position);
                 float r = surface.WorldRadiusToNormalized(agent.bodyRadius);
@@ -55,7 +84,23 @@ namespace ShadowHabitat
                     n.x,
                     n.y,
                     r);
+                _sendsThisHeartbeat++;
             }
+            _accumHeartbeat();
+        }
+
+        void _accumHeartbeat()
+        {
+            if (!verboseLogging || heartbeatInterval <= 0f) return;
+            _heartbeatAccum += Time.deltaTime;
+            if (_heartbeatAccum < heartbeatInterval) return;
+            Debug.Log($"[AgentStateBroadcaster:{name}] HB sends={_sendsThisHeartbeat}  " +
+                      $"skipNullAgent={_skipNullAgent}  skipDisabledAgent={_skipDisabledAgent}  " +
+                      $"skipInactiveGo={_skipInactiveGo}  skipNoClient={_skipNoClient}  " +
+                      $"skipNoSurface={_skipNoSurface}  agents.Count={agents.Count}");
+            _heartbeatAccum = 0f;
+            _sendsThisHeartbeat = 0;
+            _skipNullAgent = _skipDisabledAgent = _skipInactiveGo = _skipNoClient = _skipNoSurface = 0;
         }
     }
 }
